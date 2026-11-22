@@ -1,6 +1,6 @@
-import http.server, os, shutil, stat, subprocess, sys, threading, urllib.request, zipfile
+import http.server, os, re, shutil, stat, subprocess, sys, threading, urllib.request, zipfile
 
-# 1. Tiny keep-alive HTTP server for Render's required web port
+# 1. Start keep-alive HTTP server FIRST so Render doesn't time out during compilation
 port = int(os.environ.get("PORT", 10000))
 class PingHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -17,6 +17,7 @@ threading.Thread(
 
 # 2. Download lichess-bot if missing
 if not os.path.exists("lichess-bot.py"):
+    print("Downloading lichess-bot...", flush=True)
     urllib.request.urlretrieve(
         "https://github.com/lichess-bot-devs/lichess-bot/archive/refs/heads/master.zip",
         "lb.zip"
@@ -29,20 +30,36 @@ if not os.path.exists("lichess-bot.py"):
             shutil.move(os.path.join("lichess-bot-master", item), item)
     shutil.rmtree("lichess-bot-master", ignore_errors=True)
 
-# 3. Download v8_linux from your GitHub Release
+# 3. Locate v8.cpp and prepare VeloCT/ folder
 os.makedirs("VeloCT", exist_ok=True)
-bin_path = os.path.join("VeloCT", "v8_linux")
-if not os.path.exists(bin_path):
-    urllib.request.urlretrieve(
-        "https://github.com/VibeDevGPT/VeloCT/releases/download/linux/v8_linux.zip",
-        "v8.zip"
-    )
-    with zipfile.ZipFile("v8.zip") as z:
-        z.extractall("VeloCT")
-    os.remove("v8.zip")
-    os.chmod(bin_path, os.stat(bin_path).st_mode | stat.S_IEXEC)
+if os.path.exists("v8.cpp"):
+    shutil.copy2("v8.cpp", "VeloCT/v8.cpp")
+cpp_path = os.path.join("VeloCT", "v8.cpp")
 
-# 4. Generate config.yml using your Render Environment Variable
+# 4. Scan v8.cpp for NNUE files and download them
+with open(cpp_path, "r", errors="ignore") as f:
+    nets = sorted(set(re.findall(r"nn-[0-9a-f]+\.nnue", f.read())))
+
+for net in nets:
+    net_path = os.path.join("VeloCT", net)
+    if not os.path.exists(net_path):
+        print(f"Downloading {net}...", flush=True)
+        urllib.request.urlretrieve(f"https://tests.stockfishchess.org/api/nn/{net}", net_path)
+
+# 5. Compile v8.cpp every time
+print("Compiling v8.cpp...", flush=True)
+subprocess.check_call(
+    [
+        "g++", "-std=c++20", "-O3", "-march=x86-64-v2",
+        "-pthread", "-DNDEBUG", "-DIS_64BIT",
+        "v8.cpp", "-o", "v8_linux"
+    ],
+    cwd="VeloCT"
+)
+bin_path = os.path.join("VeloCT", "v8_linux")
+os.chmod(bin_path, os.stat(bin_path).st_mode | stat.S_IEXEC)
+
+# 6. Generate config.yml using Render Environment Variable
 token = os.environ["LICHESS_TOKEN"]
 with open("config.yml", "w") as f:
     f.write(f"""token: "{token}"
@@ -83,7 +100,6 @@ greeting:
 pgn_directory: ""
 """)
 
-# 5. Install dependencies & launch lichess-bot
+# 7. Install dependencies and launch lichess-bot
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 subprocess.check_call([sys.executable, "lichess-bot.py"])
-      
