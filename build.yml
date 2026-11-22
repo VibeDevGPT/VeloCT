@@ -1,0 +1,21 @@
+name: Build Linux x86_64 Engine
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile v8_linux
+        run: |
+          g++ -std=c++20 -O3 -march=x86-64-v2 -pthread -DNDEBUG -DIS_64BIT -static v8.cpp -o v8_linux
+          file v8_linux
+      - name: Upload v8_linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8_linux
+          path: v8_linux
