@@ -35,16 +35,26 @@ os.makedirs("VeloCT", exist_ok=True)
 if os.path.exists("v8.cpp"):
     shutil.copy2("v8.cpp", "VeloCT/v8.cpp")
 cpp_path = os.path.join("VeloCT", "v8.cpp")
-
-# 4. Scan v8.cpp for NNUE files and download them
+# 4. Scan v8.cpp for NNUE files and download from GitHub mirror first
 with open(cpp_path, "r", errors="ignore") as f:
     nets = sorted(set(re.findall(r"nn-[0-9a-f]+\.nnue", f.read())))
 
 for net in nets:
     net_path = os.path.join("VeloCT", net)
-    if not os.path.exists(net_path):
-        print(f"Downloading {net}...", flush=True)
-        urllib.request.urlretrieve(f"https://tests.stockfishchess.org/api/nn/{net}", net_path)
+    if not os.path.exists(net_path) or os.path.getsize(net_path) < 100_000:
+        urls = [
+            f"https://github.com/official-stockfish/networks/raw/master/{net}",
+            f"https://data.stockfishchess.org/nn/{net}",
+            f"https://tests.stockfishchess.org/api/nn/{net}",
+        ]
+        for url in urls:
+            print(f"Downloading {net} from {url}...", flush=True)
+            res = subprocess.run(["curl", "-fL", "-A", "Mozilla/5.0", url, "-o", net_path])
+            if res.returncode == 0 and os.path.exists(net_path) and os.path.getsize(net_path) >= 100_000:
+                break
+        else:
+            raise RuntimeError(f"Failed to download {net} from all mirrors")
+            
 
 # 5. Compile v8.cpp every time
 print("Compiling v8.cpp...", flush=True)
